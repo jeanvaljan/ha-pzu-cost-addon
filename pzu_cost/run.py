@@ -1,13 +1,14 @@
 #!/usr/bin/env python3
 import os
 import json
+import time
 import requests
 import datetime
 import xml.etree.ElementTree as ET
 
-# =========================
-# HOME ASSISTANT SETTINGS
-# =========================
+# ==================================================
+# HOME ASSISTANT API
+# ==================================================
 
 HA_URL = "http://supervisor/core/api"
 
@@ -22,12 +23,12 @@ HEADERS = {
 
 OPTIONS_FILE = "/data/options.json"
 
-# =========================
-# LOAD OPTIONS
-# =========================
+# ==================================================
+# LOAD ADD-ON OPTIONS
+# ==================================================
 
 if not os.path.exists(OPTIONS_FILE):
-    raise RuntimeError("options.json not found - addon not configured")
+    raise RuntimeError("options.json not found. Configure the addon first.")
 
 with open(OPTIONS_FILE, "r") as f:
     options = json.load(f)
@@ -35,19 +36,19 @@ with open(OPTIONS_FILE, "r") as f:
 IMPORTED_SENSOR = options.get("imported_sensor")
 EXPORTED_SENSOR = options.get("exported_sensor")
 
-TARIFF_DISTRIBUTION = float(options.get("tariff_distribution", 0))
-TARIFF_TRANSPORT = float(options.get("tariff_transport", 0))
-TARIFF_OTHER = float(options.get("tariff_other", 0))
+TARIFF_DISTRIBUTION = float(options.get("tariff_distribution", 0.0))
+TARIFF_TRANSPORT = float(options.get("tariff_transport", 0.0))
+TARIFF_OTHER = float(options.get("tariff_other", 0.0))
 
 print("IMPORTED_SENSOR =", IMPORTED_SENSOR)
 print("EXPORTED_SENSOR =", EXPORTED_SENSOR)
 
 if not IMPORTED_SENSOR or not EXPORTED_SENSOR:
-    raise RuntimeError("Sensor entities not configured")
+    raise RuntimeError("Sensor entities not configured in addon options")
 
-# =========================
-# HELPERS
-# =========================
+# ==================================================
+# HOME ASSISTANT HELPERS
+# ==================================================
 
 def ha_get_state(entity_id: str) -> float:
     url = f"{HA_URL}/states/{entity_id}"
@@ -66,14 +67,19 @@ def ha_set_state(entity_id: str, state, attributes=None):
         "state": state,
         "attributes": attributes or {}
     }
-
     url = f"{HA_URL}/states/{entity_id}"
     r = requests.post(url, headers=HEADERS, json=payload, timeout=30)
     r.raise_for_status()
 
+# ==================================================
+# PZU PRICE
+# ==================================================
 
-def get_pzu_average_price(date: datetime.date) -> float:
-    url = f"https://opcom.ro/rapoarte-pzu-raportPIP-export-xml/{date.day}/{date.month}/{date.year}/ro"
+def get_pzu_average_price(calc_date: datetime.date) -> float:
+    url = (
+        f"https://opcom.ro/rapoarte-pzu-raportPIP-export-xml/"
+        f"{calc_date.day}/{calc_date.month}/{calc_date.year}/ro"
+    )
     print("PZU URL:", url)
 
     r = requests.get(url, timeout=60)
@@ -88,19 +94,16 @@ def get_pzu_average_price(date: datetime.date) -> float:
             prices.append(float(price))
 
     if not prices:
-        raise RuntimeError("No PZU prices found")
+        raise RuntimeError("No PZU prices found in XML")
 
-    # PZU price is RON/MWh -> convert to RON/kWh
-    avg_price_ron_kwh = (sum(prices) / len(prices)) / 1000.0
-    return avg_price_ron_kwh
+    # RON/MWh -> RON/kWh
+    return (sum(prices) / len(prices)) / 1000.0
 
-
-# =========================
-# MAIN
-# =========================
+# ==================================================
+# MAIN LOGIC
+# ==================================================
 
 def main():
-    # ziua precedenta
     calc_day = datetime.date.today() - datetime.timedelta(days=1)
     print("Calculation day:", calc_day)
 
@@ -144,6 +147,25 @@ def main():
 
     print("Sensors updated successfully")
 
+# ==================================================
+# SERVICE LOOP (PREVENTS RESTART LOOP)
+# ==================================================
 
 if __name__ == "__main__":
-    main()
+    while True:
+        try:
+            main()
+        except Exception as e:
+            print("ERROR:", e)
+
+        now = datetime.datetime.now()
+        next_run = (now + datetime.timedelta(days=1)).replace(
+            hour=0, minute=10, second=0, microsecond=0
+        )
+
+        sleep_seconds = (next_run - now).total_seconds()
+        if sleep_seconds < 60:
+            sleep_seconds = 60
+
+        print(f"Sleeping {int(sleep_seconds)} seconds until next run")
+        time.sleep(sleep_seconds)

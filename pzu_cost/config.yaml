@@ -7,6 +7,8 @@ boot: auto
 arch: 
   - amd64
 host_network: true
+hassio_api: true
+
 
 options:
   imported_sensor: sensor.daily_imported_energy

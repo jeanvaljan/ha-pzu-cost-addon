@@ -15,11 +15,16 @@ HEADERS = {
 IMPORTED_SENSOR = os.getenv("IMPORTED_SENSOR")
 EXPORTED_SENSOR = os.getenv("EXPORTED_SENSOR")
 
-TARIFF_DIST = float(os.getenv("TARIFF_DISTRIBUTION"))
-TARIFF_TRANS = float(os.getenv("TARIFF_TRANSPORT"))
-TARIFF_SYS = float(os.getenv("TARIFF_SYSTEM"))
-TARIFF_COG = float(os.getenv("TARIFF_COGENERATION"))
-VAT = float(os.getenv("VAT"))
+def env_float(name, default):
+    val = os.getenv(name)
+    return float(val) if val not in (None, "") else default
+
+TARIFF_DIST = env_float("TARIFF_DISTRIBUTION", 0.0)
+TARIFF_TRANS = env_float("TARIFF_TRANSPORT", 0.0)
+TARIFF_SYS = env_float("TARIFF_SYSTEM", 0.0)
+TARIFF_COG = env_float("TARIFF_COGENERATION", 0.0)
+VAT = env_float("VAT", 0.0)
+
 
 FIXED_TARIFF = TARIFF_DIST + TARIFF_TRANS + TARIFF_SYS + TARIFF_COG
 

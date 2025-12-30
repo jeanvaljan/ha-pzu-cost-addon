@@ -110,8 +110,8 @@ def calculate_day(day):
     end = start + timedelta(days=1)
 
 
-    imp = aggregate(ha_history(IMPORTED_SENSOR, start, end))
-    exp = aggregate(ha_history(EXPORTED_SENSOR, start, end))
+    imp = aggregate(ha_history(IMPORTED_SENSOR, calc_day))
+    exp = aggregate(ha_history(EXPORTED_SENSOR, calc_day))
     prices = pzu_prices(day)
 
     energy_cost = sum(imp[i] * prices.get(i, 0) for i in imp)

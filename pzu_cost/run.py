@@ -50,24 +50,31 @@ def ha_ts(dt: datetime) -> str:
 # ------------------------------------------------------------
 # HOME ASSISTANT HISTORY API
 # ------------------------------------------------------------
-def ha_history(start_dt: datetime, end_dt: datetime, entity_id: str):
+def ha_energy_statistics(start_dt, end_dt, entity_id):
     start = ha_ts(start_dt)
     end = ha_ts(end_dt)
 
-    url = f"{HA_URL}/api/history/period/{start}?end_time={end}"
-    print("History URL:", url)
+    url = (
+        f"{HA_URL}/api/history/statistics/period"
+        f"?start_time={start}"
+        f"&end_time={end}"
+        f"&statistic_ids={entity_id}"
+    )
+
+    print("Statistics URL:", url)
 
     r = requests.get(url, headers=HEADERS, timeout=30)
     r.raise_for_status()
 
     data = r.json()
 
-    # HA returns list of lists → filter manually
-    for entity_history in data:
-        if entity_history and entity_history[0]["entity_id"] == entity_id:
-            return entity_history
+    if entity_id not in data or not data[entity_id]:
+        return 0.0
 
-    return []
+    stats = data[entity_id]
+
+    # sum = energia consumata/exportata in interval
+    return float(stats[-1]["sum"] - stats[0]["sum"])
 
 
 # ------------------------------------------------------------
@@ -125,11 +132,8 @@ def main():
     end_dt = start_dt + timedelta(days=1)
 
     # ---- get HA history ----
-    imported_hist = ha_history(start_dt, end_dt, IMPORTED_SENSOR)
-    exported_hist = ha_history(start_dt, end_dt, EXPORTED_SENSOR)
-
-    imported_kwh = energy_delta(imported_hist)
-    exported_kwh = energy_delta(exported_hist)
+    imported_kwh = ha_energy_statistics(start_dt, end_dt, IMPORTED_SENSOR)
+    exported_kwh = ha_energy_statistics(start_dt, end_dt, EXPORTED_SENSOR)
 
     print("Imported kWh:", imported_kwh)
     print("Exported kWh:", exported_kwh)

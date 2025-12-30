@@ -148,6 +148,11 @@ def main():
     set_sensor("sensor.pzu_daily_injected_value", inject, calc_day)
     set_sensor("sensor.pzu_daily_sold", sold, calc_day)
 
+    print("OPTIONS EXISTS:", os.path.exists("/data/options.json"))
+
+    with open("/data/options.json") as f:
+        print("OPTIONS RAW:", f.read())
+
 
 
 while True:

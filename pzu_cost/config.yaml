@@ -1,19 +1,18 @@
 name: PZU Cost Calculator
 slug: pzu_cost
 version: "2.1.0"
-description: PZU OPCOM energy cost calculation (15 min) with tariffs and VAT
+description: PZU OPCOM cost calculator
+
 startup: application
 boot: auto
-arch: 
-  - amd64
 host_network: true
-hassio_api: true
 
+hassio_api: true
+homeassistant_api: true   # ⭐ ASTA LIPSEA ⭐
 
 options:
   imported_sensor: sensor.daily_imported_energy
   exported_sensor: sensor.daily_exported_energy
-
   tariff_distribution: 0.15
   tariff_transport: 0.03
   tariff_system: 0.01

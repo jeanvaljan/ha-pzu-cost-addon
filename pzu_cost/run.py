@@ -58,13 +58,16 @@ def set_sensor(name, value):
         f"{SUPERVISOR}/states/{name}",
         headers=HEADERS,
         json={
-            "state": round(value, 2),
+            "state": round(value, 3),
             "attributes": {
                 "unit_of_measurement": "RON",
-                "device_class": "monetary"
+                "device_class": "monetary",
+                "state_class": "total_increasing",
+                "friendly_name": name.replace("_", " ").title()
             }
         }
     )
+
 
 def calculate_day(day):
     start = datetime.combine(day, datetime.min.time())

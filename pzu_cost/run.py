@@ -53,11 +53,6 @@ def day_bounds_utc(day):
     end = start + timedelta(days=1)
     return start, end
 
-
-
-
-
-
 FIXED_TARIFF = TARIFF_DIST + TARIFF_TRANS + TARIFF_SYS + TARIFF_COG
 def ha_history(start, end, entity_id):
     url = (

@@ -6,11 +6,13 @@ from datetime import datetime, timedelta, date
 from collections import defaultdict
 
 SUPERVISOR = "http://supervisor/core/api"
-TOKEN = os.environ["SUPERVISOR_TOKEN"]
+TOKEN = os.getenv("SUPERVISOR_TOKEN")
+
 HEADERS = {
     "Authorization": f"Bearer {TOKEN}",
     "Content-Type": "application/json"
 }
+
 
 IMPORTED_SENSOR = os.getenv("IMPORTED_SENSOR")
 EXPORTED_SENSOR = os.getenv("EXPORTED_SENSOR")
@@ -29,12 +31,14 @@ VAT = env_float("VAT", 0.0)
 FIXED_TARIFF = TARIFF_DIST + TARIFF_TRANS + TARIFF_SYS + TARIFF_COG
 
 def ha_history(sensor, start, end):
-    url = f"{SUPERVISOR}/history/period/{start.isoformat()}"
-    r = requests.get(url, headers=HEADERS, params={
-        "filter_entity_id": sensor,
-        "end_time": end.isoformat()
-    })
-    r.raise_for_status()
+    url = (
+        f"{SUPERVISOR}/history/period/"
+        f"{start.isoformat()}?end_time={end.isoformat()}"
+    )
+
+    resp = requests.get(url, headers=HEADERS)
+    resp.raise_for_status()
+
     return r.json()[0]
 
 def interval_15(ts):

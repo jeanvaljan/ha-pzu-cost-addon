@@ -58,20 +58,24 @@ def pzu_prices(day):
         for d in root.iter("Detail")
     }
 
-def set_sensor(name, value):
+def set_sensor(name, value, calc_date=None):
+    attrs = {
+        "unit_of_measurement": "RON",
+        "device_class": "monetary",
+        "state_class": "total_increasing"
+    }
+    if calc_date:
+        attrs["calculation_date"] = calc_date.isoformat()
+
     requests.post(
         f"{SUPERVISOR}/states/{name}",
         headers=HEADERS,
         json={
             "state": round(value, 3),
-            "attributes": {
-                "unit_of_measurement": "RON",
-                "device_class": "monetary",
-                "state_class": "total_increasing",
-                "friendly_name": name.replace("_", " ").title()
-            }
+            "attributes": attrs
         }
     )
+
 
 
 def calculate_day(day):
@@ -92,12 +96,13 @@ def calculate_day(day):
     return total, inject_value, total - inject_value
 
 def main():
-    day = date.today() - timedelta(days=1)
-    cost, inject, sold = calculate_day(day)
+    calc_day = date.today() - timedelta(days=1)
+    cost, inject, sold = calculate_day(calc_day)
 
-    set_sensor("sensor.pzu_daily_cost", cost)
-    set_sensor("sensor.pzu_daily_injected_value", inject)
-    set_sensor("sensor.pzu_daily_sold", sold)
+    set_sensor("sensor.pzu_daily_cost", cost, calc_day)
+    set_sensor("sensor.pzu_daily_injected_value", inject, calc_day)
+    set_sensor("sensor.pzu_daily_sold", sold, calc_day)
+
 
 
 while True:

@@ -16,6 +16,18 @@ HEADERS = {
 
 IMPORTED_SENSOR = os.getenv("IMPORTED_SENSOR")
 EXPORTED_SENSOR = os.getenv("EXPORTED_SENSOR")
+from datetime import datetime, timedelta, timezone
+
+def day_bounds_utc(day):
+    start = datetime(
+        year=day.year,
+        month=day.month,
+        day=day.day,
+        tzinfo=timezone.utc
+    )
+    end = start + timedelta(days=1)
+    return start, end
+
 
 def env_float(name, default):
     val = os.getenv(name)
@@ -30,7 +42,9 @@ VAT = env_float("VAT", 0.0)
 
 FIXED_TARIFF = TARIFF_DIST + TARIFF_TRANS + TARIFF_SYS + TARIFF_COG
 
-def ha_history(entity_id, start, end):
+def ha_history(entity_id, day):
+    start, end = day_bounds_utc(day)
+
     url = (
         f"{SUPERVISOR}/history/period/"
         f"{start.isoformat()}?"
@@ -41,6 +55,7 @@ def ha_history(entity_id, start, end):
     resp = requests.get(url, headers=HEADERS)
     resp.raise_for_status()
     return resp.json()
+
 
 
 def interval_15(ts):

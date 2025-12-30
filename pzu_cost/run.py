@@ -1,173 +1,197 @@
-import os
-import time
+#!/usr/bin/env python3
+
 import requests
-import xml.etree.ElementTree as ET
-from datetime import datetime, timedelta, date, timezone
-from collections import defaultdict
 import json
-from datetime import timezone
+import os
+from datetime import datetime, timedelta, timezone
+import xml.etree.ElementTree as ET
 
-def ha_ts(dt):
-    return dt.astimezone(timezone.utc).strftime("%Y-%m-%dT%H:%M:%SZ")
-
-start = ha_ts(start_dt)
-end = ha_ts(end_dt)
-
-
-print("OPTIONS EXISTS:", os.path.exists("/data/options.json"))
-
-with open("/data/options.json") as f:
-    print("OPTIONS RAW:", f.read())
-
-
-SUPERVISOR = "http://supervisor/core/api"
-TOKEN = os.getenv("SUPERVISOR_TOKEN")
+# ------------------------------------------------------------
+# CONFIG HA
+# ------------------------------------------------------------
+HA_URL = "http://supervisor/core"
+SUPERVISOR_TOKEN = os.getenv("SUPERVISOR_TOKEN")
 
 HEADERS = {
-    "Authorization": f"Bearer {TOKEN}",
-    "Content-Type": "application/json"
+    "Authorization": f"Bearer {SUPERVISOR_TOKEN}",
+    "Content-Type": "application/json",
 }
 
-with open("/data/options.json", "r") as f:
-    options = json.load(f)
+# ------------------------------------------------------------
+# READ ADD-ON OPTIONS (CORRECT WAY)
+# ------------------------------------------------------------
+OPTIONS_PATH = "/data/options.json"
 
-IMPORTED_SENSOR = options.get("imported_sensor")
-EXPORTED_SENSOR = options.get("exported_sensor")
+if not os.path.exists(OPTIONS_PATH):
+    raise RuntimeError("options.json not found – add-on not configured")
 
-TARIFF_DIST = float(options.get("tariff_distribution", 0.0))
-TARIFF_TRANS = float(options.get("tariff_transport", 0.0))
-TARIFF_SYS = float(options.get("tariff_system", 0.0))
-TARIFF_COG = float(options.get("tariff_cogeneration", 0.0))
-VAT = float(options.get("vat", 0.0))
+with open(OPTIONS_PATH, "r") as f:
+    OPTIONS = json.load(f)
+
+IMPORTED_SENSOR = OPTIONS.get("imported_sensor")
+EXPORTED_SENSOR = OPTIONS.get("exported_sensor")
 
 if not IMPORTED_SENSOR or not EXPORTED_SENSOR:
     raise RuntimeError(
-        "Add-on not configured: set imported_sensor and exported_sensor in Configuration"
+        "Add-on not configured. Set imported_sensor and exported_sensor in Configuration"
     )
 
 print("IMPORTED_SENSOR =", IMPORTED_SENSOR)
 print("EXPORTED_SENSOR =", EXPORTED_SENSOR)
 
-from datetime import datetime, timedelta, timezone
+# ------------------------------------------------------------
+# TIME HELPERS
+# ------------------------------------------------------------
+def ha_ts(dt: datetime) -> str:
+    """Return HA-compatible UTC timestamp (no +00:00)"""
+    return dt.astimezone(timezone.utc).strftime("%Y-%m-%dT%H:%M:%SZ")
 
-def day_bounds_utc(day):
-    start = datetime(
-        year=day.year,
-        month=day.month,
-        day=day.day,
-        tzinfo=timezone.utc
-    )
-    end = start + timedelta(days=1)
-    return start, end
 
-FIXED_TARIFF = TARIFF_DIST + TARIFF_TRANS + TARIFF_SYS + TARIFF_COG
-
-def ha_history(start_dt, end_dt, entity_id):
+# ------------------------------------------------------------
+# HOME ASSISTANT HISTORY API
+# ------------------------------------------------------------
+def ha_history(start_dt: datetime, end_dt: datetime, entity_id: str):
     start = ha_ts(start_dt)
     end = ha_ts(end_dt)
 
-    url = (
-        f"{HA_URL}/api/history/period/{start}"
-        f"?end_time={end}"
-    )
+    url = f"{HA_URL}/api/history/period/{start}?end_time={end}"
+    print("History URL:", url)
 
-    headers = {
-        "Authorization": f"Bearer {SUPERVISOR_TOKEN}",
-        "Content-Type": "application/json",
-    }
-
-    r = requests.get(url, headers=headers, timeout=30)
+    r = requests.get(url, headers=HEADERS, timeout=30)
     r.raise_for_status()
 
     data = r.json()
 
-    # filtram manual entity_id
+    # HA returns list of lists → filter manually
     for entity_history in data:
         if entity_history and entity_history[0]["entity_id"] == entity_id:
             return entity_history
 
     return []
 
-def interval_15(ts):
-    return ts.hour * 4 + ts.minute // 15 + 1
 
-def aggregate(history):
-    data = defaultdict(float)
-    for r in history:
-        ts = datetime.fromisoformat(r["last_changed"])
-        data[interval_15(ts)] += float(r["state"])
-    return data
+# ------------------------------------------------------------
+# ENERGY CALCULATION (DELTA kWh)
+# ------------------------------------------------------------
+def energy_delta(history):
+    """
+    history: list of state dicts
+    returns kWh consumed/exported during period
+    """
+    if not history or len(history) < 2:
+        return 0.0
 
-def pzu_prices(day):
-    url = f"https://opcom.ro/rapoarte-pzu-raportPIP-export-xml/{day.day}/{day.month}/{day.year}/ro"
-    r = requests.get(url, timeout=10)
+    try:
+        start = float(history[0]["state"])
+        end = float(history[-1]["state"])
+        return max(0.0, end - start)
+    except Exception:
+        return 0.0
+
+
+# ------------------------------------------------------------
+# OPCOM PZU PRICE (XML)
+# ------------------------------------------------------------
+def get_pzu_prices(calc_date):
+    """
+    Returns dict: interval (1-96) -> price (RON/MWh)
+    """
+    url = f"https://opcom.ro/rapoarte-pzu-raportPIP-export-xml/{calc_date.day:02d}/{calc_date.month:02d}/{calc_date.year}/ro"
+    print("PZU URL:", url)
+
+    r = requests.get(url, timeout=30)
     r.raise_for_status()
 
     root = ET.fromstring(r.text)
-    return {
-        int(d.find("Interval").text): float(d.find("Price").text) / 1000
-        for d in root.iter("Detail")
-    }
+    prices = {}
 
-def set_sensor(name, value, calc_date=None):
-    attrs = {
-        "unit_of_measurement": "RON",
-        "device_class": "monetary",
-        "state_class": "total_increasing"
-    }
-    if calc_date:
-        attrs["calculation_date"] = calc_date.isoformat()
+    for detail in root.findall(".//Detail"):
+        interval = int(detail.findtext("Interval"))
+        price = float(detail.findtext("Price"))
+        prices[interval] = price
 
-    requests.post(
-        f"{SUPERVISOR}/states/{name}",
-        headers=HEADERS,
-        json={
-            "state": round(value, 3),
-            "attributes": attrs
-        }
+    return prices
+
+
+# ------------------------------------------------------------
+# MAIN LOGIC
+# ------------------------------------------------------------
+def main():
+    # ---- calculate for PREVIOUS DAY ----
+    calc_day = datetime.now(timezone.utc).date() - timedelta(days=1)
+    print("Calculation day:", calc_day)
+
+    start_dt = datetime.combine(calc_day, datetime.min.time(), tzinfo=timezone.utc)
+    end_dt = start_dt + timedelta(days=1)
+
+    # ---- get HA history ----
+    imported_hist = ha_history(start_dt, end_dt, IMPORTED_SENSOR)
+    exported_hist = ha_history(start_dt, end_dt, EXPORTED_SENSOR)
+
+    imported_kwh = energy_delta(imported_hist)
+    exported_kwh = energy_delta(exported_hist)
+
+    print("Imported kWh:", imported_kwh)
+    print("Exported kWh:", exported_kwh)
+
+    # ---- get PZU prices ----
+    pzu_prices = get_pzu_prices(calc_day)
+
+    # ---- average daily PZU price ----
+    if not pzu_prices:
+        raise RuntimeError("No PZU prices received")
+
+    avg_pzu_price_mwh = sum(pzu_prices.values()) / len(pzu_prices)
+    avg_pzu_price_kwh = avg_pzu_price_mwh / 1000.0
+
+    print("Avg PZU price (RON/kWh):", avg_pzu_price_kwh)
+
+    # ---- cost calculation ----
+    cost_import = imported_kwh * avg_pzu_price_kwh
+    value_export = exported_kwh * avg_pzu_price_kwh
+
+    print("Import cost RON:", cost_import)
+    print("Export value RON:", value_export)
+
+    # ---- publish sensors ----
+    publish_sensor(
+        "sensor.pzu_import_cost",
+        round(cost_import, 2),
+        "RON",
+        "monetary",
+    )
+
+    publish_sensor(
+        "sensor.pzu_export_value",
+        round(value_export, 2),
+        "RON",
+        "monetary",
     )
 
 
+# ------------------------------------------------------------
+# PUBLISH SENSOR STATE
+# ------------------------------------------------------------
+def publish_sensor(entity_id, value, unit, device_class):
+    url = f"{HA_URL}/api/states/{entity_id}"
 
-def calculate_day(day):
-    from datetime import datetime, timedelta, timezone
+    payload = {
+        "state": value,
+        "attributes": {
+            "unit_of_measurement": unit,
+            "device_class": device_class,
+            "friendly_name": entity_id.replace("_", " ").title(),
+        },
+    }
 
-    start = datetime.combine(day, datetime.min.time()).replace(tzinfo=timezone.utc)
-    end = start + timedelta(days=1)
+    r = requests.post(url, headers=HEADERS, json=payload, timeout=30)
+    r.raise_for_status()
 
-
-    imp = aggregate(ha_history(IMPORTED_SENSOR, day))
-    exp = aggregate(ha_history(EXPORTED_SENSOR, day))
-    prices = pzu_prices(day)
-
-    energy_cost = sum(imp[i] * prices.get(i, 0) for i in imp)
-    inject_value = sum(exp[i] * prices.get(i, 0) for i in exp)
-
-    fixed_cost = sum(imp.values()) * FIXED_TARIFF
-    subtotal = energy_cost + fixed_cost
-    total = subtotal * (1 + VAT)
-
-    return total, inject_value, total - inject_value
-
-def main():
-    calc_day = date.today() - timedelta(days=1)
-    cost, inject, sold = calculate_day(calc_day)
-
-    set_sensor("sensor.pzu_daily_cost", cost, calc_day)
-    set_sensor("sensor.pzu_daily_injected_value", inject, calc_day)
-    set_sensor("sensor.pzu_daily_sold", sold, calc_day)
-
-    print("OPTIONS EXISTS:", os.path.exists("/data/options.json"))
-
-    with open("/data/options.json") as f:
-        print("OPTIONS RAW:", f.read())
+    print("Updated", entity_id, "=", value)
 
 
-
-while True:
-    try:
-        main()
-    except Exception as e:
-        print("ERROR:", e)
-    time.sleep(3600)
-
+# ------------------------------------------------------------
+# ENTRYPOINT
+# ------------------------------------------------------------
+if __name__ == "__main__":
+    main()

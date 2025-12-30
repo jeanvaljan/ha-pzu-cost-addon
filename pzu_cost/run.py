@@ -51,33 +51,40 @@ def ha_ts(dt: datetime) -> str:
 # HOME ASSISTANT HISTORY API
 # ------------------------------------------------------------
 
-def ha_energy_statistics(start_dt, entity_id):
+def ha_energy_from_history(start_dt, entity_id):
     start = start_dt.strftime("%Y-%m-%dT%H:%M:%SZ")
-    end = (start_dt + timedelta(days=1, seconds=-1)).strftime("%Y-%m-%dT%H:%M:%SZ")
+    end = (start_dt + timedelta(days=1)).strftime("%Y-%m-%dT%H:%M:%SZ")
 
     url = (
-        f"{HA_URL}/api/history/statistics/period/{start}"
+        f"{HA_URL}/api/history/period/{start}"
         f"?end_time={end}"
-        f"&statistic_ids={entity_id}"
-        f"&types=sum"
+        f"&filter_entity_id={entity_id}"
+        f"&minimal_response"
     )
 
-    print("Statistics URL:", url)
+    print("History URL:", url)
 
     r = requests.get(url, headers=HEADERS, timeout=30)
     r.raise_for_status()
 
     data = r.json()
-
-    if not data or entity_id not in data:
+    if not data or not data[0]:
         return 0.0
 
-    stats = data[entity_id]
-    if not stats:
+    states = data[0]
+
+    # ignoram valori non-numerice
+    values = []
+    for s in states:
+        try:
+            values.append(float(s["state"]))
+        except:
+            pass
+
+    if len(values) < 2:
         return 0.0
 
-    return float(stats[-1]["sum"])
-
+    return max(0.0, values[-1] - values[0])
 
 
 # ------------------------------------------------------------
@@ -135,8 +142,9 @@ def main():
     #end_dt = start_dt + timedelta(days=1)
 
     # ---- get HA history ----
-    imported_kwh = ha_energy_statistics(start_dt, IMPORTED_SENSOR)
-    exported_kwh = ha_energy_statistics(start_dt, EXPORTED_SENSOR)
+    imported_kwh = ha_energy_from_history(start_dt, IMPORTED_SENSOR)
+    exported_kwh = ha_energy_from_history(start_dt, EXPORTED_SENSOR)
+
 
     print("Imported kWh:", imported_kwh)
     print("Exported kWh:", exported_kwh)

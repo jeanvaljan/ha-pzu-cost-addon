@@ -16,6 +16,10 @@ HEADERS = {
 
 IMPORTED_SENSOR = os.getenv("IMPORTED_SENSOR")
 EXPORTED_SENSOR = os.getenv("EXPORTED_SENSOR")
+
+print("IMPORTED_SENSOR =", IMPORTED_SENSOR)
+print("EXPORTED_SENSOR =", EXPORTED_SENSOR)
+
 from datetime import datetime, timedelta, timezone
 
 def day_bounds_utc(day):

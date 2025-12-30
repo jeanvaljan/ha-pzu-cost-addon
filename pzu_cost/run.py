@@ -92,12 +92,13 @@ def calculate_day(day):
     return total, inject_value, total - inject_value
 
 def main():
-    today = date.today()
-    cost, inject, sold = calculate_day(today)
+    day = date.today() - timedelta(days=1)
+    cost, inject, sold = calculate_day(day)
 
     set_sensor("sensor.pzu_daily_cost", cost)
     set_sensor("sensor.pzu_daily_injected_value", inject)
     set_sensor("sensor.pzu_daily_sold", sold)
+
 
 while True:
     try:

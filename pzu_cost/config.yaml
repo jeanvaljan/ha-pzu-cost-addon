@@ -4,4 +4,5 @@ version: "1.0"
 description: Test addon visibility
 startup: application
 boot: auto
-arch: amd64
+arch: 
+  - amd64

@@ -2,7 +2,7 @@ import os
 import time
 import requests
 import xml.etree.ElementTree as ET
-from datetime import datetime, timedelta, date
+from datetime import datetime, timedelta, date, timezone
 from collections import defaultdict
 
 SUPERVISOR = "http://supervisor/core/api"
@@ -29,6 +29,7 @@ def day_bounds_utc(day):
     return start, end
 
 
+
 def env_float(name, default):
     val = os.getenv(name)
     return float(val) if val not in (None, "") else default
@@ -52,9 +53,12 @@ def ha_history(entity_id, day):
         f"filter_entity_id={entity_id}"
     )
 
+    print("History URL:", url)  # DEBUG TEMPORAR
+
     resp = requests.get(url, headers=HEADERS)
     resp.raise_for_status()
     return resp.json()
+
 
 
 

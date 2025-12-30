@@ -30,16 +30,18 @@ VAT = env_float("VAT", 0.0)
 
 FIXED_TARIFF = TARIFF_DIST + TARIFF_TRANS + TARIFF_SYS + TARIFF_COG
 
-def ha_history(sensor, start, end):
+def ha_history(entity_id, start, end):
     url = (
         f"{SUPERVISOR}/history/period/"
-        f"{start.isoformat()}?end_time={end.isoformat()}"
+        f"{start.isoformat()}?"
+        f"end_time={end.isoformat()}&"
+        f"filter_entity_id={entity_id}"
     )
 
     resp = requests.get(url, headers=HEADERS)
     resp.raise_for_status()
+    return resp.json()
 
-    return r.json()[0]
 
 def interval_15(ts):
     return ts.hour * 4 + ts.minute // 15 + 1
@@ -83,8 +85,11 @@ def set_sensor(name, value, calc_date=None):
 
 
 def calculate_day(day):
-    start = datetime.combine(day, datetime.min.time())
+    from datetime import datetime, timedelta, timezone
+
+    start = datetime.combine(day, datetime.min.time()).replace(tzinfo=timezone.utc)
     end = start + timedelta(days=1)
+
 
     imp = aggregate(ha_history(IMPORTED_SENSOR, start, end))
     exp = aggregate(ha_history(EXPORTED_SENSOR, start, end))

@@ -4,6 +4,8 @@ import requests
 import xml.etree.ElementTree as ET
 from datetime import datetime, timedelta, date, timezone
 from collections import defaultdict
+import json
+
 
 SUPERVISOR = "http://supervisor/core/api"
 TOKEN = os.getenv("SUPERVISOR_TOKEN")
@@ -13,8 +15,22 @@ HEADERS = {
     "Content-Type": "application/json"
 }
 
-IMPORTED_SENSOR = os.getenv("IMPORTED_SENSOR")
-EXPORTED_SENSOR = os.getenv("EXPORTED_SENSOR")
+with open("/data/options.json", "r") as f:
+    options = json.load(f)
+
+IMPORTED_SENSOR = options.get("imported_sensor")
+EXPORTED_SENSOR = options.get("exported_sensor")
+
+TARIFF_DIST = float(options.get("tariff_distribution", 0.0))
+TARIFF_TRANS = float(options.get("tariff_transport", 0.0))
+TARIFF_SYS = float(options.get("tariff_system", 0.0))
+TARIFF_COG = float(options.get("tariff_cogeneration", 0.0))
+VAT = float(options.get("vat", 0.0))
+
+if not IMPORTED_SENSOR or not EXPORTED_SENSOR:
+    raise RuntimeError(
+        "Add-on not configured: set imported_sensor and exported_sensor in Configuration"
+    )
 
 print("IMPORTED_SENSOR =", IMPORTED_SENSOR)
 print("EXPORTED_SENSOR =", EXPORTED_SENSOR)
@@ -33,15 +49,7 @@ def day_bounds_utc(day):
 
 
 
-def env_float(name, default):
-    val = os.getenv(name)
-    return float(val) if val not in (None, "") else default
 
-TARIFF_DIST = env_float("TARIFF_DISTRIBUTION", 0.0)
-TARIFF_TRANS = env_float("TARIFF_TRANSPORT", 0.0)
-TARIFF_SYS = env_float("TARIFF_SYSTEM", 0.0)
-TARIFF_COG = env_float("TARIFF_COGENERATION", 0.0)
-VAT = env_float("VAT", 0.0)
 
 
 FIXED_TARIFF = TARIFF_DIST + TARIFF_TRANS + TARIFF_SYS + TARIFF_COG

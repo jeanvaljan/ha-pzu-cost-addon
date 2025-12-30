@@ -59,25 +59,28 @@ def day_bounds_utc(day):
 
 
 FIXED_TARIFF = TARIFF_DIST + TARIFF_TRANS + TARIFF_SYS + TARIFF_COG
-
-def ha_history(entity_id, day):
-    start, end = day_bounds_utc(day)
-
+def ha_history(start, end, entity_id):
     url = (
-        f"{SUPERVISOR}/history/period/"
-        f"{start.isoformat()}?"
-        f"end_time={end.isoformat()}&"
-        f"filter_entity_id={entity_id}"
+        f"{HA_URL}/api/history/period/{start}"
+        f"?end_time={end}"
     )
 
-    print("History URL:", url)  # DEBUG TEMPORAR
+    headers = {
+        "Authorization": f"Bearer {SUPERVISOR_TOKEN}",
+        "Content-Type": "application/json",
+    }
 
-    resp = requests.get(url, headers=HEADERS)
-    resp.raise_for_status()
-    return resp.json()
+    r = requests.get(url, headers=headers, timeout=30)
+    r.raise_for_status()
 
+    data = r.json()
 
+    # data = list of lists, filtram manual entity_id
+    for entity_history in data:
+        if entity_history and entity_history[0]["entity_id"] == entity_id:
+            return entity_history
 
+    return []
 
 def interval_15(ts):
     return ts.hour * 4 + ts.minute // 15 + 1

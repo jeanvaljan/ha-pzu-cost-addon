@@ -6,7 +6,8 @@ description: PZU OPCOM cost calculator
 startup: application
 boot: auto
 host_network: true
-
+arch:
+  - amd64
 hassio_api: true
 homeassistant_api: true   # ⭐ ASTA LIPSEA ⭐
 

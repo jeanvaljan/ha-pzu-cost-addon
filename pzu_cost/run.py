@@ -129,11 +129,11 @@ def main():
     print("Calculation day:", calc_day)
 
     start_dt = datetime.combine(calc_day, datetime.min.time(), tzinfo=timezone.utc)
-    end_dt = start_dt + timedelta(days=1)
+    #end_dt = start_dt + timedelta(days=1)
 
     # ---- get HA history ----
-    imported_kwh = ha_energy_statistics(start_dt, end_dt, IMPORTED_SENSOR)
-    exported_kwh = ha_energy_statistics(start_dt, end_dt, EXPORTED_SENSOR)
+    imported_kwh = ha_energy_statistics(start_dt, IMPORTED_SENSOR)
+    exported_kwh = ha_energy_statistics(start_dt, EXPORTED_SENSOR)
 
     print("Imported kWh:", imported_kwh)
     print("Exported kWh:", exported_kwh)

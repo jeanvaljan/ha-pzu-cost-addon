@@ -55,11 +55,11 @@ def ha_energy_statistics(start_dt, end_dt, entity_id):
     end = ha_ts(end_dt)
 
     url = (
-        f"{HA_URL}/api/history/statistics/period"
-        f"?start_time={start}"
-        f"&end_time={end}"
-        f"&statistic_ids={entity_id}"
+    f"{HA_URL}/api/history/statistics/period/{start}"
+    f"?end_time={end}"
+    f"&statistic_ids={entity_id}"
     )
+
 
     print("Statistics URL:", url)
 

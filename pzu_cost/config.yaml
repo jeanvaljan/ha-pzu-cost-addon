@@ -1,0 +1,4 @@
+pzu:
+  username: YOUR_USERNAME
+  api_key: YOUR_API_KEY
+  interval: 60

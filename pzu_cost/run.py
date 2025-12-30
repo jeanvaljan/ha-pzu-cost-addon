@@ -13,9 +13,12 @@ HEADERS = {
     "Content-Type": "application/json"
 }
 
+def env_str(name, default):
+    val = os.getenv(name)
+    return str(val) if val not in (None, "") else default
 
-IMPORTED_SENSOR = os.getenv("IMPORTED_SENSOR")
-EXPORTED_SENSOR = os.getenv("EXPORTED_SENSOR")
+IMPORTED_SENSOR = env_str("IMPORTED_SENSOR", "IMPORTED_SENSOR")
+EXPORTED_SENSOR = env_str("EXPORTED_SENSOR", "EXPORTED_SENSOR")
 
 print("IMPORTED_SENSOR =", IMPORTED_SENSOR)
 print("EXPORTED_SENSOR =", EXPORTED_SENSOR)

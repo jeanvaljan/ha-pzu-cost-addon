@@ -1,6 +1,6 @@
 name: PZU Cost Calculator
 slug: pzu_cost
-version: "2.2.0"
+version: "2.3.0"
 description: PZU OPCOM cost calculator
 
 startup: application

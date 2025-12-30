@@ -7,6 +7,12 @@ from collections import defaultdict
 import json
 
 
+print("OPTIONS EXISTS:", os.path.exists("/data/options.json"))
+
+with open("/data/options.json") as f:
+    print("OPTIONS RAW:", f.read())
+
+
 SUPERVISOR = "http://supervisor/core/api"
 TOKEN = os.getenv("SUPERVISOR_TOKEN")
 

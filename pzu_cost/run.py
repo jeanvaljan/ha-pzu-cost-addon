@@ -1,49 +1,56 @@
-import requests
-import xml.etree.ElementTree as ET
+#!/usr/bin/env python3
+import os
 import json
-from datetime import datetime, timedelta, timezone
+import requests
+import datetime
+import xml.etree.ElementTree as ET
 
 # =========================
-# CONSTANTE HA
+# HOME ASSISTANT SETTINGS
 # =========================
 
-HA_URL = "http://supervisor/core"
+HA_URL = "http://supervisor/core/api"
+
+SUPERVISOR_TOKEN = os.getenv("SUPERVISOR_TOKEN")
+if not SUPERVISOR_TOKEN:
+    raise RuntimeError("SUPERVISOR_TOKEN not available")
 
 HEADERS = {
-    "Authorization": f"Bearer {open('/var/run/secrets/supervisor_token').read().strip()}",
+    "Authorization": f"Bearer {SUPERVISOR_TOKEN}",
     "Content-Type": "application/json",
 }
+
+OPTIONS_FILE = "/data/options.json"
 
 # =========================
 # LOAD OPTIONS
 # =========================
 
-def load_options():
-    try:
-        with open("/data/options.json", "r") as f:
-            return json.load(f)
-    except Exception as e:
-        print("ERROR loading options.json:", e)
-        return {}
+if not os.path.exists(OPTIONS_FILE):
+    raise RuntimeError("options.json not found - addon not configured")
 
-OPTIONS = load_options()
+with open(OPTIONS_FILE, "r") as f:
+    options = json.load(f)
 
-IMPORTED_SENSOR = OPTIONS.get("imported_sensor")
-EXPORTED_SENSOR = OPTIONS.get("exported_sensor")
+IMPORTED_SENSOR = options.get("imported_sensor")
+EXPORTED_SENSOR = options.get("exported_sensor")
 
-TARIFF_DISTRIBUTION = float(OPTIONS.get("tariff_distribution", 0.0))
-TARIFF_TRANSPORT = float(OPTIONS.get("tariff_transport", 0.0))
-TARIFF_OTHER = float(OPTIONS.get("tariff_other", 0.0))
+TARIFF_DISTRIBUTION = float(options.get("tariff_distribution", 0))
+TARIFF_TRANSPORT = float(options.get("tariff_transport", 0))
+TARIFF_OTHER = float(options.get("tariff_other", 0))
+
+print("IMPORTED_SENSOR =", IMPORTED_SENSOR)
+print("EXPORTED_SENSOR =", EXPORTED_SENSOR)
+
+if not IMPORTED_SENSOR or not EXPORTED_SENSOR:
+    raise RuntimeError("Sensor entities not configured")
 
 # =========================
-# HA HELPERS
+# HELPERS
 # =========================
 
-def ha_get_state(entity_id):
-    if not entity_id:
-        return 0.0
-
-    url = f"{HA_URL}/api/states/{entity_id}"
+def ha_get_state(entity_id: str) -> float:
+    url = f"{HA_URL}/states/{entity_id}"
     r = requests.get(url, headers=HEADERS, timeout=30)
     r.raise_for_status()
 
@@ -54,54 +61,47 @@ def ha_get_state(entity_id):
         return 0.0
 
 
-def ha_set_state(entity_id, value, attributes=None):
-    url = f"{HA_URL}/api/states/{entity_id}"
-
+def ha_set_state(entity_id: str, state, attributes=None):
     payload = {
-        "state": value,
+        "state": state,
         "attributes": attributes or {}
     }
 
+    url = f"{HA_URL}/states/{entity_id}"
     r = requests.post(url, headers=HEADERS, json=payload, timeout=30)
     r.raise_for_status()
 
-# =========================
-# PZU
-# =========================
 
-def fetch_pzu_avg_price(calc_day):
-    url = (
-        f"https://opcom.ro/rapoarte-pzu-raportPIP-export-xml/"
-        f"{calc_day.day:02d}/{calc_day.month:02d}/{calc_day.year}/ro"
-    )
+def get_pzu_average_price(date: datetime.date) -> float:
+    url = f"https://opcom.ro/rapoarte-pzu-raportPIP-export-xml/{date.day}/{date.month}/{date.year}/ro"
     print("PZU URL:", url)
 
-    r = requests.get(url, timeout=30)
+    r = requests.get(url, timeout=60)
     r.raise_for_status()
 
     root = ET.fromstring(r.text)
 
     prices = []
-    for detail in root.findall(".//Detail"):
-        price = float(detail.findtext("Price"))
-        prices.append(price)
+    for detail in root.iter("Detail"):
+        price = detail.findtext("Price")
+        if price:
+            prices.append(float(price))
 
     if not prices:
-        return 0.0
+        raise RuntimeError("No PZU prices found")
 
-    # RON/MWh -> RON/kWh
-    return (sum(prices) / len(prices)) / 1000.0
+    # PZU price is RON/MWh -> convert to RON/kWh
+    avg_price_ron_kwh = (sum(prices) / len(prices)) / 1000.0
+    return avg_price_ron_kwh
+
 
 # =========================
 # MAIN
 # =========================
 
 def main():
-    print("IMPORTED_SENSOR =", IMPORTED_SENSOR)
-    print("EXPORTED_SENSOR =", EXPORTED_SENSOR)
-
-    # ziua precedenta (UTC)
-    calc_day = (datetime.now(timezone.utc) - timedelta(days=1)).date()
+    # ziua precedenta
+    calc_day = datetime.date.today() - datetime.timedelta(days=1)
     print("Calculation day:", calc_day)
 
     imported_kwh = ha_get_state(IMPORTED_SENSOR)
@@ -110,16 +110,13 @@ def main():
     print("Imported kWh:", imported_kwh)
     print("Exported kWh:", exported_kwh)
 
-    avg_pzu_price = fetch_pzu_avg_price(calc_day)
+    avg_pzu_price = get_pzu_average_price(calc_day)
     print("Avg PZU price (RON/kWh):", avg_pzu_price)
 
-    total_tariff = (
-        TARIFF_DISTRIBUTION +
-        TARIFF_TRANSPORT +
-        TARIFF_OTHER
-    )
+    total_tariff = TARIFF_DISTRIBUTION + TARIFF_TRANSPORT + TARIFF_OTHER
+    final_import_price = avg_pzu_price + total_tariff
 
-    import_cost = imported_kwh * (avg_pzu_price + total_tariff)
+    import_cost = imported_kwh * final_import_price
     export_value = exported_kwh * avg_pzu_price
 
     print("Import cost RON:", import_cost)
@@ -131,8 +128,7 @@ def main():
         {
             "unit_of_measurement": "RON",
             "device_class": "monetary",
-            "state_class": "total",
-            "calculation_day": str(calc_day),
+            "state_class": "total"
         }
     )
 
@@ -142,13 +138,11 @@ def main():
         {
             "unit_of_measurement": "RON",
             "device_class": "monetary",
-            "state_class": "total",
-            "calculation_day": str(calc_day),
+            "state_class": "total"
         }
     )
 
-    print("Updated sensor.pzu_import_cost =", round(import_cost, 2))
-    print("Updated sensor.pzu_export_value =", round(export_value, 2))
+    print("Sensors updated successfully")
 
 
 if __name__ == "__main__":

@@ -1,6 +1,6 @@
 name: PZU Cost Calculator
 slug: pzu_cost
-version: "2.0.0"
+version: "2.1.0"
 description: PZU OPCOM energy cost calculation (15 min) with tariffs and VAT
 startup: application
 boot: auto

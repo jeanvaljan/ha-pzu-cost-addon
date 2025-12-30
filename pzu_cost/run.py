@@ -50,16 +50,13 @@ def ha_ts(dt: datetime) -> str:
 # ------------------------------------------------------------
 # HOME ASSISTANT HISTORY API
 # ------------------------------------------------------------
-def ha_energy_statistics(start_dt, end_dt, entity_id):
-    start = ha_ts(start_dt)
-    end = ha_ts(end_dt)
+def ha_energy_statistics(start_dt, entity_id):
+    start = start_dt.strftime("%Y-%m-%dT%H:%M:%SZ")
 
     url = (
-    f"{HA_URL}/api/history/statistics/period/{start}"
-    f"?end_time={end}"
-    f"&statistic_ids={entity_id}"
+        f"{HA_URL}/api/history/statistics/period/{start}"
+        f"?statistic_ids={entity_id}"
     )
-
 
     print("Statistics URL:", url)
 
@@ -68,13 +65,16 @@ def ha_energy_statistics(start_dt, end_dt, entity_id):
 
     data = r.json()
 
-    if entity_id not in data or not data[entity_id]:
+    if not data or entity_id not in data:
         return 0.0
 
     stats = data[entity_id]
+    if not stats:
+        return 0.0
 
-    # sum = energia consumata/exportata in interval
-    return float(stats[-1]["sum"] - stats[0]["sum"])
+    # last value of the day
+    return float(stats[-1]["sum"])
+
 
 
 # ------------------------------------------------------------

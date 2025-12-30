@@ -5,6 +5,13 @@ import xml.etree.ElementTree as ET
 from datetime import datetime, timedelta, date, timezone
 from collections import defaultdict
 import json
+from datetime import timezone
+
+def ha_ts(dt):
+    return dt.astimezone(timezone.utc).strftime("%Y-%m-%dT%H:%M:%SZ")
+
+start = ha_ts(start_dt)
+end = ha_ts(end_dt)
 
 
 print("OPTIONS EXISTS:", os.path.exists("/data/options.json"))
@@ -54,7 +61,11 @@ def day_bounds_utc(day):
     return start, end
 
 FIXED_TARIFF = TARIFF_DIST + TARIFF_TRANS + TARIFF_SYS + TARIFF_COG
-def ha_history(start, end, entity_id):
+
+def ha_history(start_dt, end_dt, entity_id):
+    start = ha_ts(start_dt)
+    end = ha_ts(end_dt)
+
     url = (
         f"{HA_URL}/api/history/period/{start}"
         f"?end_time={end}"
@@ -70,7 +81,7 @@ def ha_history(start, end, entity_id):
 
     data = r.json()
 
-    # data = list of lists, filtram manual entity_id
+    # filtram manual entity_id
     for entity_history in data:
         if entity_history and entity_history[0]["entity_id"] == entity_id:
             return entity_history

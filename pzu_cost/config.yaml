@@ -1,8 +1,28 @@
-name: PZU Cost TEST
+name: PZU Cost Calculator
 slug: pzu_cost
-version: "1.0"
-description: Test addon visibility
+version: "2.0.0"
+description: PZU OPCOM energy cost calculation (15 min) with tariffs and VAT
 startup: application
 boot: auto
 arch: 
   - amd64
+host_network: true
+
+options:
+  imported_sensor: sensor.daily_imported_energy
+  exported_sensor: sensor.daily_exported_energy
+
+  tariff_distribution: 0.15
+  tariff_transport: 0.03
+  tariff_system: 0.01
+  tariff_cogeneration: 0.02
+  vat: 0.19
+
+schema:
+  imported_sensor: str
+  exported_sensor: str
+  tariff_distribution: float
+  tariff_transport: float
+  tariff_system: float
+  tariff_cogeneration: float
+  vat: float

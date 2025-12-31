@@ -19,6 +19,8 @@ options:
   tariff_system: 0.01
   tariff_cogeneration: 0.02
   vat: 0.19
+  run_hour: 0
+  run_minute: 10
 
 schema:
   imported_sensor: str
@@ -28,3 +30,5 @@ schema:
   tariff_system: float
   tariff_cogeneration: float
   vat: float
+  run_hour: int
+  run_minute: int

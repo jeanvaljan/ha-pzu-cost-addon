@@ -70,6 +70,11 @@ def ha_get_state(entity_id: str) -> float | None:
     except ValueError:
         return None
 
+def ha_get_state_safe(entity_id: str) -> float:
+    try:
+        return ha_get_state(entity_id) or 0.0
+    except Exception:
+        return 0.0
 
 
 def ha_set_state(entity_id: str, state, attributes=None):
@@ -116,6 +121,34 @@ def get_pzu_average_price(calc_date: datetime.date) -> float:
 def main():
     calc_day = datetime.date.today() - datetime.timedelta(days=1)
     print("Calculation day:", calc_day)
+
+    # ---- cumulative sensors ----
+    import_total = ha_get_state_safe("sensor.pzu_import_cost_total")
+    export_total = ha_get_state_safe("sensor.pzu_export_value_total")
+
+    import_total += import_cost
+    export_total += export_value
+
+    ha_set_state(
+        "sensor.pzu_import_cost_total",
+        round(import_total, 2),
+        {
+            "unit_of_measurement": "RON",
+            "device_class": "monetary",
+            "state_class": "total_increasing"
+        }
+    )
+
+    ha_set_state(
+        "sensor.pzu_export_value_total",
+        round(export_total, 2),
+        {
+            "unit_of_measurement": "RON",
+            "device_class": "monetary",
+            "state_class": "total_increasing"
+        }
+    )
+
 
     imported_kwh = ha_get_state(IMPORTED_SENSOR)
     exported_kwh = ha_get_state(EXPORTED_SENSOR)

@@ -45,21 +45,31 @@ print("EXPORTED_SENSOR =", EXPORTED_SENSOR)
 
 if not IMPORTED_SENSOR or not EXPORTED_SENSOR:
     raise RuntimeError("Sensor entities not configured in addon options")
+    
+RUN_HOUR = int(options.get("run_hour", 0))
+RUN_MINUTE = int(options.get("run_minute", 10))
+
+print(f"Configured run time: {RUN_HOUR:02d}:{RUN_MINUTE:02d}")
 
 # ==================================================
 # HOME ASSISTANT HELPERS
 # ==================================================
 
-def ha_get_state(entity_id: str) -> float:
+def ha_get_state(entity_id: str) -> float | None:
     url = f"{HA_URL}/states/{entity_id}"
     r = requests.get(url, headers=HEADERS, timeout=30)
     r.raise_for_status()
 
     state = r.json().get("state")
+
+    if state in ("unknown", "unavailable", None):
+        return None
+
     try:
         return float(state)
-    except (TypeError, ValueError):
-        return 0.0
+    except ValueError:
+        return None
+
 
 
 def ha_set_state(entity_id: str, state, attributes=None):
@@ -110,6 +120,11 @@ def main():
     imported_kwh = ha_get_state(IMPORTED_SENSOR)
     exported_kwh = ha_get_state(EXPORTED_SENSOR)
 
+    if imported_kwh is None or exported_kwh is None:
+        print("Energy sensors not ready yet, skipping calculation")
+        return
+
+
     print("Imported kWh:", imported_kwh)
     print("Exported kWh:", exported_kwh)
 
@@ -159,12 +174,24 @@ if __name__ == "__main__":
             print("ERROR:", e)
 
         now = datetime.datetime.now()
-        next_run = (now + datetime.timedelta(days=1)).replace(
-            hour=0, minute=10, second=0, microsecond=0
+
+        next_run = now.replace(
+            hour=RUN_HOUR,
+            minute=RUN_MINUTE,
+            second=0,
+            microsecond=0
         )
+
+        if next_run <= now:
+            next_run += datetime.timedelta(days=1)
 
         sleep_seconds = (next_run - now).total_seconds()
         if sleep_seconds < 60:
+            sleep_seconds = 60
+
+        print(f"Sleeping until {next_run} ({int(sleep_seconds)} seconds)")
+        time.sleep(sleep_seconds)
+
             sleep_seconds = 60
 
         print(f"Sleeping {int(sleep_seconds)} seconds until next run")

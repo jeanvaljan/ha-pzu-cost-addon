@@ -117,12 +117,93 @@ def get_pzu_average_price(calc_date: datetime.date) -> float:
 # ==================================================
 # MAIN LOGIC
 # ==================================================
-
 def main():
-    calc_day = datetime.date.today() - datetime.timedelta(days=1)
-    print("Calculation day:", calc_day)
+    # -----------------------------
+    # 1. Ziua de calcul (ZIUA TRECUTĂ)
+    # -----------------------------
+    calc_day = (datetime.utcnow() - timedelta(days=1)).date()
+    print(f"Calculation day: {calc_day}")
 
-    # ---- cumulative sensors ----
+    # -----------------------------
+    # 2. Validare senzori configurați
+    # -----------------------------
+    if not IMPORTED_SENSOR or not EXPORTED_SENSOR:
+        print("ERROR: IMPORTED_SENSOR or EXPORTED_SENSOR not configured")
+        return
+
+    # -----------------------------
+    # 3. Citire energie zilnică (kWh)
+    # -----------------------------
+    imported_kwh = ha_get_state(IMPORTED_SENSOR)
+    exported_kwh = ha_get_state(EXPORTED_SENSOR)
+
+    if imported_kwh is None or exported_kwh is None:
+        print("Energy sensors not ready yet, skipping calculation")
+        return
+
+    print(f"Imported kWh: {imported_kwh}")
+    print(f"Exported kWh: {exported_kwh}")
+
+    # -----------------------------
+    # 4. Preț PZU mediu (RON/kWh)
+    # -----------------------------
+    avg_pzu_price = get_pzu_average_price(calc_day)
+    if avg_pzu_price is None:
+        print("PZU price not available, skipping calculation")
+        return
+
+    print(f"Avg PZU price (RON/kWh): {avg_pzu_price}")
+
+    # -----------------------------
+    # 5. Tarife fixe
+    # -----------------------------
+    total_tariff = (
+        TARIFF_DISTRIBUTION +
+        TARIFF_TRANSPORT +
+        TARIFF_OTHER
+    )
+
+    final_import_price = avg_pzu_price + total_tariff
+
+    # -----------------------------
+    # 6. Calcul costuri zilnice
+    # -----------------------------
+    import_cost = imported_kwh * final_import_price
+    export_value = exported_kwh * avg_pzu_price
+
+    print(f"Import cost RON: {import_cost}")
+    print(f"Export value RON: {export_value}")
+
+    # -----------------------------
+    # 7. Senzori ZILNICI
+    # -----------------------------
+    ha_set_state(
+        "sensor.pzu_import_cost",
+        round(import_cost, 2),
+        {
+            "unit_of_measurement": "RON",
+            "state_class": "measurement",
+            "device_class": "monetary",
+            "friendly_name": "PZU Import Cost (Daily)",
+            "calculation_day": str(calc_day),
+        }
+    )
+
+    ha_set_state(
+        "sensor.pzu_export_value",
+        round(export_value, 2),
+        {
+            "unit_of_measurement": "RON",
+            "state_class": "measurement",
+            "device_class": "monetary",
+            "friendly_name": "PZU Export Value (Daily)",
+            "calculation_day": str(calc_day),
+        }
+    )
+
+    # -----------------------------
+    # 8. Senzori CUMULATIVI
+    # -----------------------------
     import_total = ha_get_state_safe("sensor.pzu_import_cost_total")
     export_total = ha_get_state_safe("sensor.pzu_export_value_total")
 
@@ -134,8 +215,9 @@ def main():
         round(import_total, 2),
         {
             "unit_of_measurement": "RON",
+            "state_class": "total_increasing",
             "device_class": "monetary",
-            "state_class": "total_increasing"
+            "friendly_name": "PZU Import Cost (Total)",
         }
     )
 
@@ -144,56 +226,14 @@ def main():
         round(export_total, 2),
         {
             "unit_of_measurement": "RON",
+            "state_class": "total_increasing",
             "device_class": "monetary",
-            "state_class": "total_increasing"
+            "friendly_name": "PZU Export Value (Total)",
         }
     )
 
+    print("Daily PZU calculation completed successfully")
 
-    imported_kwh = ha_get_state(IMPORTED_SENSOR)
-    exported_kwh = ha_get_state(EXPORTED_SENSOR)
-
-    if imported_kwh is None or exported_kwh is None:
-        print("Energy sensors not ready yet, skipping calculation")
-        return
-
-
-    print("Imported kWh:", imported_kwh)
-    print("Exported kWh:", exported_kwh)
-
-    avg_pzu_price = get_pzu_average_price(calc_day)
-    print("Avg PZU price (RON/kWh):", avg_pzu_price)
-
-    total_tariff = TARIFF_DISTRIBUTION + TARIFF_TRANSPORT + TARIFF_OTHER
-    final_import_price = avg_pzu_price + total_tariff
-
-    import_cost = imported_kwh * final_import_price
-    export_value = exported_kwh * avg_pzu_price
-
-    print("Import cost RON:", import_cost)
-    print("Export value RON:", export_value)
-
-    ha_set_state(
-        "sensor.pzu_import_cost",
-        round(import_cost, 2),
-        {
-            "unit_of_measurement": "RON",
-            "device_class": "monetary",
-            "state_class": "total"
-        }
-    )
-
-    ha_set_state(
-        "sensor.pzu_export_value",
-        round(export_value, 2),
-        {
-            "unit_of_measurement": "RON",
-            "device_class": "monetary",
-            "state_class": "total"
-        }
-    )
-
-    print("Sensors updated successfully")
 
 # ==================================================
 # SERVICE LOOP (PREVENTS RESTART LOOP)

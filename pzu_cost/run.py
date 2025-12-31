@@ -5,6 +5,8 @@ import time
 import requests
 import datetime
 import xml.etree.ElementTree as ET
+from datetime import datetime, timedelta
+
 
 # ==================================================
 # HOME ASSISTANT API

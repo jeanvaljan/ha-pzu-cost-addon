@@ -103,6 +103,26 @@ def get_pzu_average_price(calc_day):
         return None
 
     return sum(prices) / len(prices)
+LOCK_FILE = "/data/last_run_date.txt"
+
+def already_ran_today(calc_day):
+    if not os.path.exists(LOCK_FILE):
+        return False
+
+    try:
+        with open(LOCK_FILE) as f:
+            last_day = f.read().strip()
+        return last_day == str(calc_day)
+    except Exception:
+        return False
+
+
+def mark_ran_today(calc_day):
+    try:
+        with open(LOCK_FILE, "w") as f:
+            f.write(str(calc_day))
+    except Exception as e:
+        print("Failed to write lock file:", e)
 
 # =========================================================
 # MAIN
@@ -114,6 +134,10 @@ def main():
     # -----------------------------------------------------
     calc_day = (datetime.utcnow() - timedelta(days=1)).date()
     print(f"Calculation day: {calc_day}")
+    
+    if already_ran_today(calc_day):
+    print("Already ran for this day, exiting")
+    return
 
     # -----------------------------------------------------
     # 2. Validate configuration
@@ -224,6 +248,7 @@ def main():
     )
 
     print("PZU daily calculation finished successfully")
+    mark_ran_today(calc_day)
 
 # =========================================================
 # RUN ONCE AND EXIT (NO RESTART LOOP)

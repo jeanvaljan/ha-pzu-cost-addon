@@ -191,8 +191,3 @@ if __name__ == "__main__":
 
         print(f"Sleeping until {next_run} ({int(sleep_seconds)} seconds)")
         time.sleep(sleep_seconds)
-
-            sleep_seconds = 60
-
-        print(f"Sleeping {int(sleep_seconds)} seconds until next run")
-        time.sleep(sleep_seconds)

@@ -11,13 +11,22 @@ from datetime import datetime, timedelta
 # Home Assistant Supervisor API
 # =========================================================
 
-SUPERVISOR_TOKEN_PATH = "/var/run/secrets/supervisor_token"
+SUPERVISOR_TOKEN = os.getenv("SUPERVISOR_TOKEN")
+
+if not SUPERVISOR_TOKEN:
+    try:
+        with open("/var/run/secrets/supervisor_token") as f:
+            SUPERVISOR_TOKEN = f.read().strip()
+    except FileNotFoundError:
+        raise RuntimeError("Supervisor token not available")
+
 SUPERVISOR_URL = "http://supervisor/core/api"
 
 HEADERS = {
-    "Authorization": f"Bearer {open(SUPERVISOR_TOKEN_PATH).read().strip()}",
+    "Authorization": f"Bearer {SUPERVISOR_TOKEN}",
     "Content-Type": "application/json",
 }
+
 
 # =========================================================
 # Load addon options

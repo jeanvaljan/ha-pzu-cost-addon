@@ -133,13 +133,18 @@ def main():
         # Read meters
         imp = ha_get_state(IMPORTED_SENSOR)
         exp = ha_get_state(EXPORTED_SENSOR)
+        print("Index import:", imp)
+        print("Index export:", exp)
 
         if state["last_import"] is not None:
             delta_import = max(0, imp - state["last_import"])
             delta_export = max(0, exp - state["last_export"])
+            print("delta_export:", delta_export)
             delta_export = abs(delta_export)
+            print("delta_export_abs:", delta_export)
 
             interval = current_interval()
+            print("Interval:", interval)
             pzu_price = prices.get(interval, 0)
 
             state["import_cost"] += delta_import * (pzu_price + TOTAL_TARIFF)

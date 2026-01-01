@@ -137,6 +137,7 @@ def main():
         if state["last_import"] is not None:
             delta_import = max(0, imp - state["last_import"])
             delta_export = max(0, exp - state["last_export"])
+            delta_export = abs(delta_export)
 
             interval = current_interval()
             pzu_price = prices.get(interval, 0)

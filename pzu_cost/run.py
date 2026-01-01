@@ -5,255 +5,189 @@ import json
 import time
 import requests
 import xml.etree.ElementTree as ET
-from datetime import datetime, timedelta
+from datetime import datetime
+import pytz
 
-# =========================================================
-# Home Assistant Supervisor API
-# =========================================================
+# ======================================================
+# CONFIG
+# ======================================================
+
+OPTIONS = json.load(open("/data/options.json"))
+
+IMPORTED_SENSOR = OPTIONS["imported_sensor"]
+EXPORTED_SENSOR = OPTIONS["exported_sensor"]
+
+TARIFF_DISTRIBUTION = float(OPTIONS.get("tariff_distribution", 0))
+TARIFF_TRANSPORT = float(OPTIONS.get("tariff_transport", 0))
+TARIFF_OTHER = float(OPTIONS.get("tariff_other", 0))
+
+TIMEZONE = pytz.timezone("Europe/Bucharest")
+
+STATE_FILE = "/data/last_energy.json"
+DAY_FILE = "/data/current_day.json"
+
+# ======================================================
+# SUPERVISOR API
+# ======================================================
 
 SUPERVISOR_TOKEN = os.getenv("SUPERVISOR_TOKEN")
-
 if not SUPERVISOR_TOKEN:
-    try:
-        with open("/var/run/secrets/supervisor_token") as f:
-            SUPERVISOR_TOKEN = f.read().strip()
-    except FileNotFoundError:
-        raise RuntimeError("Supervisor token not available")
-
-SUPERVISOR_URL = "http://supervisor/core/api"
+    with open("/var/run/secrets/supervisor_token") as f:
+        SUPERVISOR_TOKEN = f.read().strip()
 
 HEADERS = {
     "Authorization": f"Bearer {SUPERVISOR_TOKEN}",
     "Content-Type": "application/json",
 }
 
+BASE_URL = "http://supervisor/core/api"
 
-# =========================================================
-# Load addon options
-# =========================================================
+# ======================================================
+# HELPERS
+# ======================================================
 
-OPTIONS_PATH = "/data/options.json"
-OPTIONS = {}
-
-if os.path.exists(OPTIONS_PATH):
-    with open(OPTIONS_PATH) as f:
-        OPTIONS = json.load(f)
-
-IMPORTED_SENSOR = OPTIONS.get("imported_sensor")
-EXPORTED_SENSOR = OPTIONS.get("exported_sensor")
-
-TARIFF_DISTRIBUTION = float(OPTIONS.get("tariff_distribution", 0))
-TARIFF_TRANSPORT = float(OPTIONS.get("tariff_transport", 0))
-TARIFF_OTHER = float(OPTIONS.get("tariff_other", 0))
-
-print("IMPORTED_SENSOR =", IMPORTED_SENSOR)
-print("EXPORTED_SENSOR =", EXPORTED_SENSOR)
-
-# =========================================================
-# Helper functions
-# =========================================================
-
-def ha_get_state(entity_id):
-    """Read HA sensor state as float"""
-    url = f"{SUPERVISOR_URL}/states/{entity_id}"
-    r = requests.get(url, headers=HEADERS, timeout=10)
+def ha_get_state(entity):
+    r = requests.get(f"{BASE_URL}/states/{entity}", headers=HEADERS, timeout=10)
     r.raise_for_status()
-    state = r.json().get("state")
-    try:
-        return float(state)
-    except (TypeError, ValueError):
-        return None
+    return float(r.json()["state"])
 
 
-def ha_get_state_safe(entity_id):
-    """Return state or 0 if sensor does not exist"""
-    try:
-        value = ha_get_state(entity_id)
-        return value if value is not None else 0.0
-    except Exception:
-        return 0.0
+def ha_set_state(entity, state, attrs):
+    requests.post(
+        f"{BASE_URL}/states/{entity}",
+        headers=HEADERS,
+        json={"state": round(state, 4), "attributes": attrs},
+        timeout=10,
+    ).raise_for_status()
 
 
-def ha_set_state(entity_id, state, attributes=None):
-    url = f"{SUPERVISOR_URL}/states/{entity_id}"
-    payload = {
-        "state": state,
-        "attributes": attributes or {}
-    }
-    r = requests.post(url, headers=HEADERS, json=payload, timeout=10)
-    r.raise_for_status()
+def load_json(path, default):
+    if os.path.exists(path):
+        return json.load(open(path))
+    return default
 
 
-def get_pzu_average_price(calc_day):
-    """Fetch PZU prices and return average RON/kWh"""
-    url = f"https://opcom.ro/rapoarte-pzu-raportPIP-export-xml/{calc_day.day:02d}/{calc_day.month:02d}/{calc_day.year}/ro"
-    print("PZU URL:", url)
+def save_json(path, data):
+    json.dump(data, open(path, "w"))
 
+
+# ======================================================
+# PZU
+# ======================================================
+
+def load_pzu_prices(today):
+    url = f"https://opcom.ro/rapoarte-pzu-raportPIP-export-xml/{today.day:02d}/{today.month:02d}/{today.year}/ro"
     r = requests.get(url, timeout=20)
     r.raise_for_status()
 
     root = ET.fromstring(r.text)
-    prices = []
+    prices = {}
 
-    for detail in root.iter("Detail"):
-        price_mwh = float(detail.find("Price").text)
-        prices.append(price_mwh / 1000.0)  # RON/kWh
+    for d in root.iter("Detail"):
+        interval = int(d.find("Interval").text)
+        price = float(d.find("Price").text) / 1000.0
+        prices[interval] = price
 
-    if not prices:
-        return None
-
-    return sum(prices) / len(prices)
-LOCK_FILE = "/data/last_run_date.txt"
-
-def already_ran_today(calc_day):
-    if not os.path.exists(LOCK_FILE):
-        return False
-
-    try:
-        with open(LOCK_FILE) as f:
-            last_day = f.read().strip()
-        return last_day == str(calc_day)
-    except Exception:
-        return False
+    return prices
 
 
-def mark_ran_today(calc_day):
-    try:
-        with open(LOCK_FILE, "w") as f:
-            f.write(str(calc_day))
-    except Exception as e:
-        print("Failed to write lock file:", e)
+def current_interval(now):
+    return now.hour * 4 + now.minute // 15 + 1
 
-# =========================================================
-# MAIN
-# =========================================================
+
+# ======================================================
+# MAIN LOOP
+# ======================================================
 
 def main():
-    # -----------------------------------------------------
-    # 1. Calculation day = yesterday (UTC-safe)
-    # -----------------------------------------------------
-    calc_day = (datetime.utcnow() - timedelta(days=1)).date()
-    print(f"Calculation day: {calc_day}")
-    
-    if already_ran_today(calc_day):
-        print("Already ran for this day, exiting")
-        return
+    print("PZU REAL-TIME addon started")
 
-    # -----------------------------------------------------
-    # 2. Validate configuration
-    # -----------------------------------------------------
-    if not IMPORTED_SENSOR or not EXPORTED_SENSOR:
-        print("ERROR: Sensors not configured")
-        return
+    pzu_cache = {}
+    current_day = None
 
-    # -----------------------------------------------------
-    # 3. Read daily energy sensors
-    # -----------------------------------------------------
-    imported_kwh = ha_get_state(IMPORTED_SENSOR)
-    exported_kwh = ha_get_state(EXPORTED_SENSOR)
+    while True:
+        now = datetime.now(TIMEZONE)
+        today = now.date()
 
-    if imported_kwh is None or exported_kwh is None:
-        print("Daily sensors not ready yet")
-        return
+        # ---- Zi noua → reset ----
+        if current_day != today:
+            print("New day detected, resetting totals")
+            current_day = today
+            pzu_cache = load_pzu_prices(today)
 
-    print(f"Imported kWh: {imported_kwh}")
-    print(f"Exported kWh: {exported_kwh}")
+            save_json(DAY_FILE, {
+                "date": str(today),
+                "import_cost": 0.0,
+                "export_value": 0.0
+            })
 
-    # -----------------------------------------------------
-    # 4. PZU average price
-    # -----------------------------------------------------
-    avg_pzu_price = get_pzu_average_price(calc_day)
-    if avg_pzu_price is None:
-        print("No PZU data")
-        return
+            save_json(STATE_FILE, {
+                "import": ha_get_state(IMPORTED_SENSOR),
+                "export": ha_get_state(EXPORTED_SENSOR)
+            })
 
-    print(f"Avg PZU price (RON/kWh): {avg_pzu_price}")
+        # ---- Citire energie ----
+        last = load_json(STATE_FILE, {})
+        curr_import = ha_get_state(IMPORTED_SENSOR)
+        curr_export = ha_get_state(EXPORTED_SENSOR)
 
-    # -----------------------------------------------------
-    # 5. Tariffs
-    # -----------------------------------------------------
-    total_tariff = (
-        TARIFF_DISTRIBUTION +
-        TARIFF_TRANSPORT +
-        TARIFF_OTHER
-    )
+        delta_import = max(0, curr_import - last.get("import", curr_import))
+        delta_export = max(0, curr_export - last.get("export", curr_export))
 
-    final_import_price = avg_pzu_price + total_tariff
+        save_json(STATE_FILE, {
+            "import": curr_import,
+            "export": curr_export
+        })
 
-    # -----------------------------------------------------
-    # 6. Cost calculation
-    # -----------------------------------------------------
-    import_cost = imported_kwh * final_import_price
-    export_value = exported_kwh * avg_pzu_price
+        if delta_import == 0 and delta_export == 0:
+            time.sleep(300)
+            continue
 
-    print(f"Import cost RON: {import_cost}")
-    print(f"Export value RON: {export_value}")
+        # ---- Interval curent ----
+        interval = current_interval(now)
+        price = pzu_cache.get(interval)
 
-    # -----------------------------------------------------
-    # 7. Daily sensors
-    # -----------------------------------------------------
-    ha_set_state(
-        "sensor.pzu_import_cost",
-        round(import_cost, 2),
-        {
-            "unit_of_measurement": "RON",
-            "device_class": "monetary",
-            "state_class": "measurement",
-            "friendly_name": "PZU Import Cost (Daily)",
-            "calculation_day": str(calc_day),
-        }
-    )
+        if price is None:
+            time.sleep(300)
+            continue
 
-    ha_set_state(
-        "sensor.pzu_export_value",
-        round(export_value, 2),
-        {
-            "unit_of_measurement": "RON",
-            "device_class": "monetary",
-            "state_class": "measurement",
-            "friendly_name": "PZU Export Value (Daily)",
-            "calculation_day": str(calc_day),
-        }
-    )
+        tariff = TARIFF_DISTRIBUTION + TARIFF_TRANSPORT + TARIFF_OTHER
 
-    # -----------------------------------------------------
-    # 8. Total sensors
-    # -----------------------------------------------------
-    import_total = ha_get_state_safe("sensor.pzu_import_cost_total")
-    export_total = ha_get_state_safe("sensor.pzu_export_value_total")
+        day = load_json(DAY_FILE, {})
+        day["import_cost"] += delta_import * (price + tariff)
+        day["export_value"] += delta_export * price
 
-    import_total += import_cost
-    export_total += export_value
+        save_json(DAY_FILE, day)
 
-    ha_set_state(
-        "sensor.pzu_import_cost_total",
-        round(import_total, 2),
-        {
-            "unit_of_measurement": "RON",
-            "device_class": "monetary",
-            "state_class": "total_increasing",
-            "friendly_name": "PZU Import Cost (Total)",
-        }
-    )
+        # ---- Update senzori HA ----
+        ha_set_state(
+            "sensor.pzu_import_cost",
+            day["import_cost"],
+            {
+                "unit_of_measurement": "RON",
+                "device_class": "monetary",
+                "state_class": "measurement",
+            }
+        )
 
-    ha_set_state(
-        "sensor.pzu_export_value_total",
-        round(export_total, 2),
-        {
-            "unit_of_measurement": "RON",
-            "device_class": "monetary",
-            "state_class": "total_increasing",
-            "friendly_name": "PZU Export Value (Total)",
-        }
-    )
+        ha_set_state(
+            "sensor.pzu_export_value",
+            day["export_value"],
+            {
+                "unit_of_measurement": "RON",
+                "device_class": "monetary",
+                "state_class": "measurement",
+            }
+        )
 
-    print("PZU daily calculation finished successfully")
-    mark_ran_today(calc_day)
+        print(
+            f"[{now.strftime('%H:%M')}] ΔImport={delta_import:.4f} kWh "
+            f"ΔExport={delta_export:.4f} kWh Interval={interval}"
+        )
 
-# =========================================================
-# RUN ONCE AND EXIT (NO RESTART LOOP)
-# =========================================================
+        time.sleep(300)
 
+
+# ======================================================
 if __name__ == "__main__":
     main()
-    time.sleep(5)

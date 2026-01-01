@@ -136,8 +136,8 @@ def main():
     print(f"Calculation day: {calc_day}")
     
     if already_ran_today(calc_day):
-    print("Already ran for this day, exiting")
-    return
+        print("Already ran for this day, exiting")
+        return
 
     # -----------------------------------------------------
     # 2. Validate configuration

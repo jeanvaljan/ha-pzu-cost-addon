@@ -154,7 +154,7 @@ def main():
             state["import_cost"] += delta_import * (pzu_price + TOTAL_TARIFF)
             state["export_value"] += delta_export * pzu_price
             print("import_cost:", state["import_cost"])
-            print("export_cost:", state["export_cost"])
+            print("export_value:", state["export_value"])
 
             ha_set_state(
                 "sensor.pzu_import_cost",

@@ -38,9 +38,11 @@ EXPORTED_SENSOR = OPTIONS["exported_sensor"]
 
 TARIFF_DISTRIBUTION = float(OPTIONS.get("tariff_distribution", 0))
 TARIFF_TRANSPORT = float(OPTIONS.get("tariff_transport", 0))
-TARIFF_OTHER = float(OPTIONS.get("tariff_other", 0))
+TARIFF_SYSTEM = float(OPTIONS.get("tariff_system", 0))
+TARIFF_COGENERATION = float(OPTIONS.get("tariff_cogeneration", 0))
+VAT = float(OPTIONS.get("vat", 0))
 
-TOTAL_TARIFF = TARIFF_DISTRIBUTION + TARIFF_TRANSPORT + TARIFF_OTHER
+TOTAL_TARIFF = TARIFF_DISTRIBUTION + TARIFF_TRANSPORT + TARIFF_SYSTEM + TARIFF_COGENERATION
 
 # ======================================================
 # HA helpers

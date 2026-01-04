@@ -55,6 +55,10 @@ def ha_get_state(entity_id):
 def ha_set_state(entity_id, state, attributes=None):
     payload = {"state": state, "attributes": attributes or {}}
     r = requests.post(f"{SUPERVISOR_URL}/states/{entity_id}", headers=HEADERS, json=payload)
+    print("request:")
+    print(r.request.url)
+    print(r.request.body)
+    print(r.request.headers)
     r.raise_for_status()
 
 # ======================================================
@@ -139,9 +143,9 @@ def main():
         if state["last_import"] is not None:
             delta_import = max(0, imp - state["last_import"])
             delta_export = max(0, exp - state["last_export"])
+            print("delta_import:", delta_import)
+            #delta_export = abs(delta_export)
             print("delta_export:", delta_export)
-            delta_export = abs(delta_export)
-            print("delta_export_abs:", delta_export)
 
             interval = current_interval()
             print("Interval:", interval)
@@ -149,6 +153,8 @@ def main():
 
             state["import_cost"] += delta_import * (pzu_price + TOTAL_TARIFF)
             state["export_value"] += delta_export * pzu_price
+            print("import_cost:", state["import_cost"])
+            print("export_cost:", state["export_cost"])
 
             ha_set_state(
                 "sensor.pzu_import_cost",

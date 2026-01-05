@@ -193,8 +193,10 @@ def recompute_today(prices):
 
     for i in range(1, current_int + 1):
         price = prices.get(i, 0)
-        cost += (imp_kwh / current_int) * (price + TOTAL_TARIFF)
-        value += (exp_kwh / current_int) * price
+        #cost += (imp_kwh / current_int) * (price + TOTAL_TARIFF)
+        #value += (exp_kwh / current_int) * price
+        cost += imp_kwh * (price + TOTAL_TARIFF)
+        value += exp_kwh * price
 
     return cost, value, imp_now, exp_now
 

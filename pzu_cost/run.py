@@ -38,6 +38,7 @@ TARIFF_DISTRIBUTION = float(OPTIONS.get("tariff_distribution", 0))
 TARIFF_TRANSPORT = float(OPTIONS.get("tariff_transport", 0))
 TARIFF_SYSTEM = float(OPTIONS.get("tariff_system", 0))
 TARIFF_COGENERATION = float(OPTIONS.get("tariff_cogeneration", 0))
+VAT = float(OPTIONS.get("vat", 0))
 
 TOTAL_TARIFF = (
     TARIFF_DISTRIBUTION
@@ -58,46 +59,36 @@ def ha_get_state(entity_id):
 
 def ha_set_state(entity_id, state, attributes=None):
     payload = {"state": state, "attributes": attributes or {}}
-    r = requests.post(
-        f"{SUPERVISOR_URL}/states/{entity_id}",
-        headers=HEADERS,
-        json=payload,
-        timeout=10,
-    )
+    r = requests.post(f"{SUPERVISOR_URL}/states/{entity_id}", headers=HEADERS, json=payload, timeout=10)
     r.raise_for_status()
 
 
-# ======================================================
-# Statistics (STATE for total_increasing)
-# ======================================================
-
-def ha_statistics_sum_at(statistic_id, start):
-    url = f"{SUPERVISOR_URL}/history/statistics/period/{start}"
+def ha_statistics_sum(entity_id, start_time, end_time):
+    url = f"{SUPERVISOR_URL}/history/statistics/period"
     params = {
-        "statistic_ids": f"energy:{statistic_id}",
-        "types": "state",
+        "start_time": start_time,
+        "end_time": end_time,
+        "statistic_ids": entity_id,
+        "types": "sum",
     }
 
     r = requests.get(url, headers=HEADERS, params=params, timeout=20)
     r.raise_for_status()
 
-    data = r.json().get(f"energy:{statistic_id}")
+    data = r.json().get(entity_id)
     if not data:
         return None
 
-    return data[0]["state"]
-
+    return data[0]["sum"]
 
 # ======================================================
-# PZU prices (today, published yesterday)
+# PZU (today, published yesterday)
 # ======================================================
 
-def load_pzu_prices_for_today():
+def load_pzu_prices_today():
     today = datetime.now().date()
-    url = (
-        "https://opcom.ro/rapoarte-pzu-raportPIP-export-xml/"
-        f"{today.day:02d}/{today.month:02d}/{today.year}/ro"
-    )
+    url = f"https://opcom.ro/rapoarte-pzu-raportPIP-export-xml/{today.day:02d}/{today.month:02d}/{today.year}/ro"
+    print("PZU URL:", url)
 
     r = requests.get(url, timeout=20)
     r.raise_for_status()
@@ -107,11 +98,10 @@ def load_pzu_prices_for_today():
 
     for d in root.iter("Detail"):
         interval = int(d.find("Interval").text)
-        price_kwh = float(d.find("Price").text) / 1000.0
-        prices[interval] = price_kwh
+        price = float(d.find("Price").text) / 1000.0
+        prices[interval] = price
 
     return prices
-
 
 # ======================================================
 # Helpers
@@ -122,42 +112,35 @@ def current_interval():
     return (now.hour * 60 + now.minute) // 15 + 1
 
 
-def interval_start(interval, day):
+def interval_timestamp(interval, day):
     base = datetime.fromisoformat(day)
-    return base + timedelta(minutes=(interval - 1) * 15)
-
+    return (base + timedelta(minutes=(interval - 1) * 15)).isoformat()
 
 # ======================================================
-# Recompute FULL DAY at startup
+# Recompute FULL day at startup
 # ======================================================
 
 def recompute_today(prices):
     today = datetime.now().date().isoformat()
     midnight = f"{today}T00:00:00"
+    now = datetime.now().isoformat()
 
-    imp_start = ha_statistics_sum_at(IMPORTED_SENSOR, midnight)
-    exp_start = ha_statistics_sum_at(EXPORTED_SENSOR, midnight)
+    imp_kwh = ha_statistics_sum(IMPORTED_SENSOR, midnight, now) or 0.0
+    exp_kwh = ha_statistics_sum(EXPORTED_SENSOR, midnight, now) or 0.0
 
-    if imp_start is None or exp_start is None:
-        print("Statistics not ready yet, skipping recompute")
-        return 0.0, 0.0, None, None
+    cost = 0.0
+    value = 0.0
 
-    imp_now = ha_get_state(IMPORTED_SENSOR)
-    exp_now = ha_get_state(EXPORTED_SENSOR)
+    current_int = current_interval()
+    for i in range(1, current_int + 1):
+        price = prices.get(i, 0)
+        cost += (imp_kwh / current_int) * (price + TOTAL_TARIFF)
+        value += (exp_kwh / current_int) * price
 
-    delta_import = max(0, imp_now - imp_start)
-    delta_export = max(0, exp_now - exp_start)
+    last_imp = ha_get_state(IMPORTED_SENSOR)
+    last_exp = ha_get_state(EXPORTED_SENSOR)
 
-    intervals_passed = current_interval()
-    avg_price = sum(
-        prices.get(i, 0) for i in range(1, intervals_passed + 1)
-    ) / max(1, intervals_passed)
-
-    import_cost = delta_import * (avg_price + TOTAL_TARIFF)
-    export_value = delta_export * avg_price
-
-    return import_cost, export_value, imp_now, exp_now
-
+    return cost, value, last_imp, last_exp
 
 # ======================================================
 # Persistence
@@ -165,87 +148,78 @@ def recompute_today(prices):
 
 STATE_FILE = "/data/realtime_state.json"
 
-def load_state():
-    if not os.path.exists(STATE_FILE):
-        return {}
-    with open(STATE_FILE) as f:
-        return json.load(f)
-
-
 def save_state(state):
     with open(STATE_FILE, "w") as f:
         json.dump(state, f)
 
-
 # ======================================================
-# MAIN LOOP
+# MAIN
 # ======================================================
 
 def main():
     print("Starting REAL-TIME PZU addon (robust mode)")
 
-    prices = load_pzu_prices_for_today()
-    state = load_state()
-
-    # 🔁 FULL recompute at startup
-    cost, value, last_imp, last_exp = recompute_today(prices)
-
+    prices = load_pzu_prices_today()
     today = datetime.now().date().isoformat()
+
+    import_cost, export_value, last_imp, last_exp = recompute_today(prices)
 
     state = {
         "day": today,
         "last_import": last_imp,
         "last_export": last_exp,
-        "import_cost": cost,
-        "export_value": value,
+        "import_cost": import_cost,
+        "export_value": export_value,
     }
+
     save_state(state)
 
     while True:
         now = datetime.now()
         today = now.date().isoformat()
 
-        # reset at midnight
-        if state["day"] != today:
-            state = {
-                "day": today,
-                "last_import": ha_get_state(IMPORTED_SENSOR),
-                "last_export": ha_get_state(EXPORTED_SENSOR),
-                "import_cost": 0.0,
-                "export_value": 0.0,
-            }
-            save_state(state)
+        # publish PZU sensor
+        interval = current_interval()
+        price = prices.get(interval, 0)
 
+        attrs = {
+            interval_timestamp(i, today): round(p, 4)
+            for i, p in prices.items()
+        }
+
+        ha_set_state(
+            "sensor.pzu_price",
+            round(price, 4),
+            {
+                "unit_of_measurement": "RON/kWh",
+                "state_class": "measurement",
+                "device_class": "monetary",
+                "interval": interval,
+                "prices": attrs,
+                "source": "OPCOM",
+            },
+        )
+
+        # read meters
         imp = ha_get_state(IMPORTED_SENSOR)
         exp = ha_get_state(EXPORTED_SENSOR)
 
-        delta_import = max(0, imp - state["last_import"])
-        delta_export = max(0, exp - state["last_export"])
+        delta_imp = max(0, imp - state["last_import"])
+        delta_exp = max(0, exp - state["last_export"])
 
-        interval = current_interval()
-        pzu_price = prices.get(interval, 0)
-
-        state["import_cost"] += delta_import * (pzu_price + TOTAL_TARIFF)
-        state["export_value"] += delta_export * pzu_price
+        state["import_cost"] += delta_imp * (price + TOTAL_TARIFF)
+        state["export_value"] += delta_exp * price
 
         ha_set_state(
             "sensor.pzu_import_cost",
             round(state["import_cost"], 2),
-            {
-                "unit_of_measurement": "RON",
-                "device_class": "monetary",
-                "state_class": "measurement",
-            },
+            {"unit_of_measurement": "RON", "state_class": "measurement"},
         )
 
         ha_set_state(
             "sensor.pzu_export_value",
             round(state["export_value"], 2),
-            {
-                "unit_of_measurement": "RON",
-                "device_class": "monetary",
-                "state_class": "measurement",
-            },
+            {"unit_of_measurement": "RON", "state_class": "measurement"},
         )
 
         state["last_import"] = imp
@@ -253,7 +227,6 @@ def main():
         save_state(state)
 
         time.sleep(300)
-
 
 # ======================================================
 

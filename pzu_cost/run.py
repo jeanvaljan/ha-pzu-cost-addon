@@ -68,14 +68,14 @@ def ha_set_state(entity_id, state, attributes=None):
 
 
 # ======================================================
-# Statistics (SUM for total_increasing)
+# Statistics (STATE for total_increasing)
 # ======================================================
 
 def ha_statistics_sum_at(statistic_id, start):
     url = f"{SUPERVISOR_URL}/history/statistics/period/{start}"
     params = {
         "statistic_ids": f"energy:{statistic_id}",
-        "types": "sum",
+        "types": "state",
     }
 
     r = requests.get(url, headers=HEADERS, params=params, timeout=20)
@@ -85,7 +85,7 @@ def ha_statistics_sum_at(statistic_id, start):
     if not data:
         return None
 
-    return data[0]["sum"]
+    return data[0]["state"]
 
 
 # ======================================================

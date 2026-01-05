@@ -63,6 +63,12 @@ def ha_set_state(entity_id, state, attributes=None):
     print(r.request.headers)
     r.raise_for_status()
 
+def interval_to_timestamp(interval, day):
+    base = datetime.fromisoformat(day)
+    minutes = (interval - 1) * 15
+    return (base + timedelta(minutes=minutes)).isoformat()
+
+
 # ======================================================
 # PZU prices (for TODAY, published yesterday)
 # ======================================================
@@ -123,6 +129,29 @@ def main():
     while True:
         now = datetime.now()
         today = str(now.date())
+
+        prices_attr = {}
+        for interval, price in prices.items():
+            ts = interval_to_timestamp(interval, today)
+            prices_attr[ts] = round(price, 4)
+
+        current_int = current_interval()
+        current_price = prices.get(current_int, 0)
+
+        ha_set_state(
+            "sensor.pzu_price",
+            round(current_price, 4),
+            {
+                "unit_of_measurement": "RON/kWh",
+                "device_class": "monetary",
+                "state_class": "measurement",
+                "prices": prices_attr,
+                "interval": current_int,
+                "source": "OPCOM",
+            },
+        )
+
+
 
         # Reset at midnight
         if state["day"] != today:
